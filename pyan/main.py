@@ -157,6 +157,14 @@ def main(cli_args=None):
         help="Package root directory. Is inferred by default.",
     )
 
+    parser.add_argument(
+        "-I",
+        "--include",
+        action="append",
+        dest="includes",
+        help="Additional directories to search for modules (e.g. site-packages).",
+    )
+
     known_args, unknown_args = parser.parse_known_args(cli_args)
 
     filenames = [os.path.abspath(fn2) for fn in unknown_args for fn2 in glob(fn, recursive=True)]
@@ -206,7 +214,11 @@ def main(cli_args=None):
     if root:
         root = os.path.abspath(root)
 
-    v = CallGraphVisitor(filenames, logger=logger, root=root)
+    includes = []
+    if known_args.includes:
+        includes = [os.path.abspath(inc) for inc in known_args.includes]
+
+    v = CallGraphVisitor(filenames, logger=logger, root=root, includes=includes)
 
     if known_args.function or known_args.namespace:
 

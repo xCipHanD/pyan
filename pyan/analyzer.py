@@ -52,7 +52,7 @@ class CallGraphVisitor(ast.NodeVisitor):
     all files.  This way use information between objects in different files
     can be gathered."""
 
-    def __init__(self, filenames, root: str = None, logger=None):
+    def __init__(self, filenames, root: str = None, logger=None, includes=None):
         self.logger = logger or logging.getLogger(__name__)
 
         # full module names for all given files
@@ -61,6 +61,10 @@ class CallGraphVisitor(ast.NodeVisitor):
         self.roots = set()
         if root:
             self.roots.add(os.path.abspath(root))
+        
+        if includes:
+            for inc in includes:
+                self.roots.add(os.path.abspath(inc))
 
         # full module names for all given files
         self.module_to_filename = {}  # inverse mapping for recording which file each AST node came from

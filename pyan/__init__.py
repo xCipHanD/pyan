@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
-from importlib.metadata import version
+from importlib.metadata import version, PackageNotFoundError
 import sys
 import warnings
 
-__version__ = version("pyan3")
+try:
+    __version__ = version("pyan3")
+except PackageNotFoundError:
+    __version__ = "0.0.0-dev"
 
 if sys.version_info[:2] == (3, 9):
     # Emit a red warning if running in a terminal that supports ANSI colors.
