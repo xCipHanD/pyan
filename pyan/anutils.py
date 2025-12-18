@@ -215,7 +215,7 @@ class Scope:
     def __init__(self, table):
         """table: SymTable instance from symtable.symtable()"""
         name = table.get_name()
-        if name == "top":
+        if name == "top" and table.get_type() == "module":
             name = ""  # Pyan defines the top level as anonymous
         self.name = name
         self.type = table.get_type()  # useful for __repr__()
