@@ -4,6 +4,7 @@
 
 import ast
 import logging
+import os
 import symtable
 from typing import Union
 
@@ -55,12 +56,33 @@ class CallGraphVisitor(ast.NodeVisitor):
         self.logger = logger or logging.getLogger(__name__)
 
         # full module names for all given files
-        self.module_to_filename = {}  # inverse mapping for recording which file each AST node came from
-        for filename in filenames:
-            mod_name = get_module_name(filename)
-            self.module_to_filename[mod_name] = filename
         self.filenames = filenames
         self.root = root
+        self.roots = set()
+        if root:
+            self.roots.add(os.path.abspath(root))
+
+        # full module names for all given files
+        self.module_to_filename = {}  # inverse mapping for recording which file each AST node came from
+        for filename in filenames:
+            filename = os.path.abspath(filename)
+            mod_name = get_module_name(filename, root)
+            self.module_to_filename[mod_name] = filename
+
+            # Infer root
+            curr = filename
+            parts = mod_name.split('.')
+            if os.path.basename(curr) == '__init__.py':
+                curr = os.path.dirname(curr)
+            else:
+                curr = os.path.dirname(curr)
+                parts = parts[:-1]
+            
+            for _ in parts:
+                curr = os.path.dirname(curr)
+            
+            self.roots.add(curr)
+
 
         # data gathered from analysis
         self.defines_edges = {}
@@ -84,12 +106,37 @@ class CallGraphVisitor(ast.NodeVisitor):
         # Analyze.
         self.process()
 
+    def find_module(self, module_name):
+        """Try to find the source file for a module."""
+        for root in self.roots:
+            base_path = os.path.join(root, *module_name.split('.'))
+            
+            # Check for .py file
+            py_path = base_path + '.py'
+            if os.path.exists(py_path) and os.path.isfile(py_path):
+                return py_path
+            
+            # Check for package directory
+            init_path = os.path.join(base_path, '__init__.py')
+            if os.path.exists(init_path) and os.path.isfile(init_path):
+                return init_path
+        return None
+
     def process(self):
         """Analyze the set of files, twice so that any forward-references are picked up."""
         for pas in range(2):
-            for filename in self.filenames:
-                self.logger.info("========== pass %d, file '%s' ==========" % (pas + 1, filename))
-                self.process_one(filename)
+            if pas == 0:
+                # Use a while loop to handle files added during analysis
+                i = 0
+                while i < len(self.filenames):
+                    filename = self.filenames[i]
+                    self.logger.info("========== pass %d, file '%s' ==========" % (pas + 1, filename))
+                    self.process_one(filename)
+                    i += 1
+            else:
+                for filename in self.filenames:
+                    self.logger.info("========== pass %d, file '%s' ==========" % (pas + 1, filename))
+                    self.process_one(filename)
             if pas == 0:
                 self.resolve_base_classes()  # must be done only after all files seen
         self.postprocess()
@@ -569,13 +616,33 @@ class CallGraphVisitor(ast.NodeVisitor):
         else:
             tgt_name = node.module  # normal from module.submodule import foo
 
+        # Try to find the module we are importing FROM
+        if tgt_name and tgt_name not in self.module_to_filename:
+            found_file = self.find_module(tgt_name)
+            if found_file and found_file not in self.filenames:
+                self.logger.info("Discovered new file: %s" % found_file)
+                self.filenames.append(found_file)
+                self.module_to_filename[tgt_name] = found_file
+
         # link each import separately
         for alias in node.names:
             # check if import is module
             if tgt_name + "." + alias.name in self.module_to_filename:
                 to_node = self.get_node("", tgt_name + "." + alias.name, node, flavor=Flavor.MODULE)
             else:
-                to_node = self.get_node(tgt_name, alias.name, node, flavor=Flavor.IMPORTEDITEM)
+                # Try to find submodule
+                full_name = tgt_name + "." + alias.name
+                if full_name not in self.module_to_filename:
+                    found_file = self.find_module(full_name)
+                    if found_file and found_file not in self.filenames:
+                        self.logger.info("Discovered new file: %s" % found_file)
+                        self.filenames.append(found_file)
+                        self.module_to_filename[full_name] = found_file
+
+                if full_name in self.module_to_filename:
+                    to_node = self.get_node("", full_name, node, flavor=Flavor.MODULE)
+                else:
+                    to_node = self.get_node(tgt_name, alias.name, node, flavor=Flavor.IMPORTEDITEM)
             # if there is alias, add extra edge between alias and node
             if alias.asname is not None:
                 alias_name = alias.asname
@@ -597,6 +664,13 @@ class CallGraphVisitor(ast.NodeVisitor):
         ast_node: for recording source location information
         """
         src_name = import_item.name  # what is being imported
+
+        if src_name not in self.module_to_filename:
+            found_file = self.find_module(src_name)
+            if found_file and found_file not in self.filenames:
+                self.logger.info("Discovered new file: %s" % found_file)
+                self.filenames.append(found_file)
+                self.module_to_filename[src_name] = found_file
 
         # mark the use site
         #
