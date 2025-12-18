@@ -243,6 +243,7 @@ class ExecuteInInnerScope:
         scopename: name of the inner scope"""
         self.analyzer = analyzer
         self.scopename = scopename
+        self.entered = False
 
     def __enter__(self):
         # The inner scopes pollute the graph too much; we will need to collapse
@@ -256,13 +257,20 @@ class ExecuteInInnerScope:
         inner_ns = analyzer.get_node_of_current_namespace().get_name()
         if inner_ns not in analyzer.scopes:
             analyzer.name_stack.pop()
-            raise ValueError("Unknown scope '%s'" % (inner_ns))
+            # raise ValueError("Unknown scope '%s'" % (inner_ns))
+            self.entered = False
+            return self
+            
         analyzer.scope_stack.append(analyzer.scopes[inner_ns])
         analyzer.context_stack.append(scopename)
+        self.entered = True
 
         return self
 
     def __exit__(self, errtype, errvalue, traceback):
+        if not self.entered:
+            return
+
         # TODO: do we need some error handling here?
         analyzer = self.analyzer
         scopename = self.scopename
